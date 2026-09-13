@@ -52,6 +52,30 @@ It should be a long random bytes or str.
 
 On helm this can be set on `extraSecretEnv.SUPERSET_SECRET_KEY` or `configOverrides.secrets`
 
+## Existing database credentials
+
+To load the metadata database credentials from a Secret managed outside the chart
+(for example one created by CloudNativePG or an AWS RDS integration), reference it
+from `database.existingSecret`:
+
+```yaml
+postgresql:
+  enabled: false
+database:
+  host: postgresql.database.svc.cluster.local
+  name: superset
+  existingSecret: metadata-db-credentials
+  secretKeys:
+    password: password   # default
+    user: username       # optional; omit to keep using database.user
+```
+
+`DB_PASS` (and `DB_USER` when `secretKeys.user` is set) are injected via `secretKeyRef`
+into every Superset container and the init job, and are omitted from the chart's
+generated `-env` Secret. The built-in `wait-for-postgres` init containers only need
+`DB_HOST`/`DB_PORT`, which are still provided by the chart Secret. A full `database.uri`
+takes precedence and disables the reference.
+
 ## Upgrade Notes
 
 ### Kubernetes recommended labels (breaking)
