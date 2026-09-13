@@ -24,6 +24,8 @@ generation that can be used by both generate_chart and generate_explore_link too
 
 import hashlib
 import logging
+import types
+import typing
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Dict, TYPE_CHECKING
@@ -672,6 +674,66 @@ def _without_generated_gauge_time_filter(
     ]
 
 
+# Scalar config fields whose mapper emits them under a differently named
+# form_data key. Fields not listed here share their name with the key.
+_RENAMED_SCALAR_CONTROL_KEYS: dict[str, str] = {
+    "legend_orientation": "legendOrientation",
+    "outer_radius": "outerRadius",
+    "inner_radius": "innerRadius",
+    "handlebars_template": "handlebarsTemplate",
+    "aggregate_function": "aggregateFunction",
+    "show_row_totals": "rowTotals",
+    "show_column_totals": "colTotals",
+    "show_column_subtotals": "colSubTotals",
+    "show_row_group_counts": "rowGroupCounts",
+    "transpose": "transposePivot",
+    "combine_metric": "combineMetric",
+    "value_format": "valueFormat",
+    "sort_descending": "order_desc",
+}
+
+
+_SCALAR_CONTROL_TYPES = (str, int, float, bool, type(None))
+
+
+def _is_scalar_annotation(annotation: Any) -> bool:
+    """Return True when a field annotation only admits scalar values."""
+    origin = typing.get_origin(annotation)
+    if origin is typing.Literal:
+        return True
+    if origin is typing.Annotated:
+        return _is_scalar_annotation(typing.get_args(annotation)[0])
+    if origin is typing.Union or origin is types.UnionType:
+        return all(_is_scalar_annotation(arg) for arg in typing.get_args(annotation))
+    return isinstance(annotation, type) and issubclass(
+        annotation, _SCALAR_CONTROL_TYPES
+    )
+
+
+def _without_defaulted_scalar_controls(
+    new_form_data: dict[str, Any],
+    existing_form_data: dict[str, Any],
+    config: ChartConfig,
+) -> dict[str, Any]:
+    """Drop patch keys the mapper materialized from an omitted scalar field.
+
+    Mappers always emit a value for controls such as ``row_limit`` or
+    ``color_scheme`` even when the caller never set them, so the merge could
+    not tell an omission from an explicit default and reset the saved value.
+    Only scalar fields are considered; collections keep their existing
+    ``explicitly empty clears`` handling.
+    """
+    fields_set = config.model_fields_set
+    patch = dict(new_form_data)
+    for field_name, field_info in type(config).model_fields.items():
+        if field_name in fields_set or not _is_scalar_annotation(field_info.annotation):
+            continue
+        key = _RENAMED_SCALAR_CONTROL_KEYS.get(field_name, field_name)
+        if key in existing_form_data:
+            patch.pop(key, None)
+    return patch
+
+
 def merge_chart_form_data(  # noqa: C901
     existing_form_data: dict[str, Any],
     new_form_data: dict[str, Any],
@@ -693,7 +755,10 @@ def merge_chart_form_data(  # noqa: C901
         fields_set = config.model_fields_set
         if "filters" not in fields_set:
             preserve_previous_adhoc_filters(new_form_data, existing_form_data)
-        merged = {**existing_form_data, **new_form_data}
+        patch = _without_defaulted_scalar_controls(
+            new_form_data, existing_form_data, config
+        )
+        merged = {**existing_form_data, **patch}
         # An explicitly empty collection clears the control rather than
         # falling through to the inherited value.
         for config_field, form_data_field in (

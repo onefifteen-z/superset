@@ -36,8 +36,11 @@ from superset.mcp_service.chart.chart_utils import (
     is_column_truly_temporal,
     map_config_to_form_data,
     map_filter_operator,
+    map_pie_config,
     map_table_config,
+    map_treemap_config,
     map_xy_config,
+    merge_chart_form_data,
     merge_interactive_pivot_ui_config,
     merge_table_column_config,
     validate_chart_dataset,
@@ -47,11 +50,100 @@ from superset.mcp_service.chart.schemas import (
     ColumnRef,
     FilterConfig,
     LegendConfig,
+    PieChartConfig,
     SortByConfig,
     TableChartConfig,
+    TreemapChartConfig,
     XYChartConfig,
 )
 from superset.utils.core import ColumnSpec, FilterOperator, GenericDataType
+
+
+class TestMergeChartFormDataOmittedControls:
+    """Controls the caller omits keep their saved value on update."""
+
+    _PIE_BASE: dict[str, Any] = {
+        "chart_type": "pie",
+        "metric": {"name": "cnt", "aggregate": "COUNT"},
+        "dimension": {"name": "region"},
+    }
+
+    def _saved_pie(self) -> dict[str, Any]:
+        return map_pie_config(
+            PieChartConfig(
+                **self._PIE_BASE,
+                color_scheme="lyftColors",
+                row_limit=25,
+                donut=True,
+                legend_orientation="left",
+            )
+        )
+
+    def test_omitted_defaulted_controls_keep_saved_values(self) -> None:
+        saved = self._saved_pie()
+        cfg = PieChartConfig(
+            **dict(self._PIE_BASE, metric={"name": "gdp", "aggregate": "SUM"})
+        )
+        merged = merge_chart_form_data(saved, map_pie_config(cfg), cfg)
+
+        assert merged["metric"]["label"] == "SUM(gdp)"
+        assert merged["color_scheme"] == "lyftColors"
+        assert merged["row_limit"] == 25
+        assert merged["donut"] is True
+        assert merged["legendOrientation"] == "left"
+
+    def test_explicit_default_value_overrides_saved_value(self) -> None:
+        saved = self._saved_pie()
+        cfg = PieChartConfig(
+            **self._PIE_BASE,
+            color_scheme="supersetColors",
+            row_limit=100,
+            donut=False,
+        )
+        merged = merge_chart_form_data(saved, map_pie_config(cfg), cfg)
+
+        assert merged["color_scheme"] == "supersetColors"
+        assert merged["row_limit"] == 100
+        assert merged["donut"] is False
+
+    def test_defaults_materialize_when_saved_form_data_lacks_key(self) -> None:
+        saved = self._saved_pie()
+        saved.pop("row_limit")
+        cfg = PieChartConfig(**self._PIE_BASE)
+        merged = merge_chart_form_data(saved, map_pie_config(cfg), cfg)
+
+        assert merged["row_limit"] == 100
+
+    def test_treemap_omitted_controls_keep_saved_values(self) -> None:
+        base: dict[str, Any] = {
+            "chart_type": "treemap_v2",
+            "metric": {"name": "cnt", "aggregate": "COUNT"},
+            "groupby": [{"name": "region"}],
+        }
+        saved = map_treemap_config(
+            TreemapChartConfig(**base, color_scheme="lyftColors", row_limit=50)
+        )
+        cfg = TreemapChartConfig(
+            **dict(base, metric={"name": "gdp", "aggregate": "SUM"})
+        )
+        merged = merge_chart_form_data(saved, map_treemap_config(cfg), cfg)
+
+        assert merged["color_scheme"] == "lyftColors"
+        assert merged["row_limit"] == 50
+
+    def test_xy_required_keys_are_not_dropped(self) -> None:
+        base: dict[str, Any] = {
+            "chart_type": "xy",
+            "x": {"name": "ds"},
+            "y": [{"name": "cnt", "aggregate": "COUNT"}],
+            "kind": "line",
+        }
+        saved = map_xy_config(XYChartConfig(**base, color_scheme="lyftColors"))
+        cfg = XYChartConfig(**dict(base, x={"name": "month"}))
+        merged = merge_chart_form_data(saved, map_xy_config(cfg), cfg)
+
+        assert merged["x_axis"] == "month"
+        assert merged["color_scheme"] == "lyftColors"
 
 
 class TestGetTableChartTypeLabel:
