@@ -652,6 +652,16 @@ _GAUGE_PRESENTATION_FORM_DATA_KEYS = frozenset(
 )
 
 
+# Controls whose mapper always materializes a value (a schema default or a
+# fallback such as ``supersetColors``), so their presence in the mapped
+# form_data cannot distinguish an omitted field from an explicit one. When the
+# caller did not set the config field, the saved value is kept.
+_DEFAULTED_FORM_DATA_FIELD_MAP: dict[str, str] = {
+    "color_scheme": "color_scheme",
+    "row_limit": "row_limit",
+}
+
+
 def _without_generated_gauge_time_filter(
     form_data: dict[str, Any],
 ) -> list[Any]:
@@ -693,7 +703,11 @@ def merge_chart_form_data(  # noqa: C901
         fields_set = config.model_fields_set
         if "filters" not in fields_set:
             preserve_previous_adhoc_filters(new_form_data, existing_form_data)
-        merged = {**existing_form_data, **new_form_data}
+        patch = dict(new_form_data)
+        for config_field, form_data_field in _DEFAULTED_FORM_DATA_FIELD_MAP.items():
+            if config_field not in fields_set and form_data_field in existing_form_data:
+                patch.pop(form_data_field, None)
+        merged = {**existing_form_data, **patch}
         # An explicitly empty collection clears the control rather than
         # falling through to the inherited value.
         for config_field, form_data_field in (

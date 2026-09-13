@@ -36,8 +36,10 @@ from superset.mcp_service.chart.chart_utils import (
     is_column_truly_temporal,
     map_config_to_form_data,
     map_filter_operator,
+    map_pie_config,
     map_table_config,
     map_xy_config,
+    merge_chart_form_data,
     merge_interactive_pivot_ui_config,
     merge_table_column_config,
     validate_chart_dataset,
@@ -47,6 +49,7 @@ from superset.mcp_service.chart.schemas import (
     ColumnRef,
     FilterConfig,
     LegendConfig,
+    PieChartConfig,
     SortByConfig,
     TableChartConfig,
     XYChartConfig,
@@ -2497,3 +2500,62 @@ class TestDatasetValidatorSkipsSqlMetrics:
         )
         assert normalized.y[0].sql_expression == _SQL_EXPR
         assert normalized.y[0].name is None
+
+
+class TestMergeChartFormDataPreservesDefaultedControls:
+    """Omitted controls whose mapper materializes a default keep the saved value."""
+
+    @staticmethod
+    def _pie(**overrides: Any) -> PieChartConfig:
+        base: dict[str, Any] = {
+            "chart_type": "pie",
+            "dimension": ColumnRef(name="region"),
+            "metric": ColumnRef(name="revenue", aggregate="SUM"),
+        }
+        return PieChartConfig(**{**base, **overrides})
+
+    def test_pie_omitted_color_scheme_and_row_limit_are_preserved(self) -> None:
+        saved = map_pie_config(self._pie(color_scheme="lyftColors", row_limit=25))
+        config = self._pie(metric=ColumnRef(name="cost", aggregate="SUM"))
+
+        merged = merge_chart_form_data(saved, map_pie_config(config), config)
+
+        assert merged["color_scheme"] == "lyftColors"
+        assert merged["row_limit"] == 25
+        assert merged["metric"]["column"]["column_name"] == "cost"
+
+    def test_pie_explicit_values_override_saved(self) -> None:
+        saved = map_pie_config(self._pie(color_scheme="lyftColors", row_limit=25))
+        config = self._pie(color_scheme="supersetColors", row_limit=100)
+
+        merged = merge_chart_form_data(saved, map_pie_config(config), config)
+
+        assert merged["color_scheme"] == "supersetColors"
+        assert merged["row_limit"] == 100
+
+    def test_xy_omitted_row_limit_is_preserved(self) -> None:
+        def xy(**overrides: Any) -> XYChartConfig:
+            base: dict[str, Any] = {
+                "chart_type": "xy",
+                "x": ColumnRef(name="ds"),
+                "y": [ColumnRef(name="revenue", aggregate="SUM")],
+                "kind": "line",
+            }
+            return XYChartConfig(**{**base, **overrides})
+
+        saved = map_xy_config(xy(row_limit=50), dataset_id="1")
+        config = xy(y=[ColumnRef(name="cost", aggregate="SUM")])
+
+        merged = merge_chart_form_data(saved, map_xy_config(config, "1"), config)
+
+        assert merged["row_limit"] == 50
+        assert merged["viz_type"] == saved["viz_type"]
+
+    def test_missing_saved_value_falls_back_to_mapper_default(self) -> None:
+        saved = map_pie_config(self._pie())
+        saved.pop("row_limit")
+        config = self._pie()
+
+        merged = merge_chart_form_data(saved, map_pie_config(config), config)
+
+        assert merged["row_limit"] == 100
