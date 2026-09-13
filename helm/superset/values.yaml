@@ -332,6 +332,16 @@ database:
   password: ~
   # -- Database name (default: superset, resolved via superset.db.name)
   name: ~
+  # -- Existing Secret holding the database credentials (supports templating).
+  # When set, DB_PASS (and optionally DB_USER) are injected via secretKeyRef into every
+  # Superset container and the init job instead of being rendered into the chart's Secret.
+  # Ignored when database.uri is set.
+  existingSecret: ""
+  secretKeys:
+    # -- Key in database.existingSecret holding the password
+    password: password
+    # -- Optional key in database.existingSecret holding the username; when empty database.user is used
+    user: ""
   # -- Database SSL configuration
   ssl:
     enabled: false
