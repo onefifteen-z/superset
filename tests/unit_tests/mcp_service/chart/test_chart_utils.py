@@ -34,6 +34,7 @@ from superset.mcp_service.chart.chart_utils import (
     generate_explore_link,
     get_table_chart_type_label,
     is_column_truly_temporal,
+    map_box_plot_config,
     map_config_to_form_data,
     map_filter_operator,
     map_pie_config,
@@ -47,6 +48,7 @@ from superset.mcp_service.chart.chart_utils import (
 )
 from superset.mcp_service.chart.schemas import (
     AxisConfig,
+    BoxPlotChartConfig,
     ColumnRef,
     FilterConfig,
     LegendConfig,
@@ -2635,6 +2637,42 @@ class TestMergeChartFormDataOmittedDefaults:
         assert merged["show_legend"] is False
         assert merged["legendOrientation"] == "right"
 
+    _BOX_PLOT_BASE: dict[str, Any] = {
+        "chart_type": "box_plot",
+        "metrics": [{"name": "revenue", "aggregate": "SUM"}],
+        "distribute_across": [{"name": "region"}],
+    }
+
+    def test_box_plot_omitted_whisker_options_are_preserved(self) -> None:
+        saved = map_box_plot_config(
+            BoxPlotChartConfig(
+                **self._BOX_PLOT_BASE,
+                whisker_type="percentile",
+                percentile_low=5,
+                percentile_high=95,
+            )
+        )
+        config = BoxPlotChartConfig(**self._BOX_PLOT_BASE)
+
+        merged = merge_chart_form_data(saved, map_box_plot_config(config), config)
+
+        assert merged["whiskerOptions"] == "5/95 percentiles"
+
+    def test_box_plot_explicit_whisker_type_overrides_saved_value(self) -> None:
+        saved = map_box_plot_config(
+            BoxPlotChartConfig(
+                **self._BOX_PLOT_BASE,
+                whisker_type="percentile",
+                percentile_low=5,
+                percentile_high=95,
+            )
+        )
+        config = BoxPlotChartConfig(**self._BOX_PLOT_BASE, whisker_type="min_max")
+
+        merged = merge_chart_form_data(saved, map_box_plot_config(config), config)
+
+        assert merged["whiskerOptions"] == "Min/max (no outliers)"
+
     def test_table_omitted_row_limit_is_preserved(self) -> None:
         saved = map_table_config(
             TableChartConfig(columns=[ColumnRef(name="region")], row_limit=42)
@@ -2645,6 +2683,17 @@ class TestMergeChartFormDataOmittedDefaults:
 
         assert merged["row_limit"] == 42
         assert merged["all_columns"] == ["country"]
+
+    def test_mapped_key_without_config_field_is_still_applied(self) -> None:
+        """``order_desc`` is in the defaulted-key map but TableChartConfig has
+        no such field, so the mapper's value must not be dropped as omitted."""
+        saved = map_table_config(TableChartConfig(columns=[ColumnRef(name="a")]))
+        saved["order_desc"] = False
+        config = TableChartConfig(columns=[ColumnRef(name="a")])
+
+        merged = merge_chart_form_data(saved, map_table_config(config), config)
+
+        assert merged["order_desc"] is True
 
     def test_missing_saved_key_falls_back_to_mapper_default(self) -> None:
         saved = map_pie_config(PieChartConfig(**self._PIE_BASE))
