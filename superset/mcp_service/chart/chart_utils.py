@@ -652,6 +652,69 @@ _GAUGE_PRESENTATION_FORM_DATA_KEYS = frozenset(
 )
 
 
+#: form_data keys the non-Gauge mappers always emit from schema defaults,
+#: mapped to the config field(s) that set them. When none of those fields
+#: is explicitly set, the key is dropped from the update patch so the saved
+#: value survives instead of being reset to the default.
+_DEFAULTED_FORM_DATA_FIELD_MAP: dict[str, tuple[str, ...]] = {
+    "row_limit": ("row_limit",),
+    "series_limit": ("series_limit",),
+    "color_scheme": ("color_scheme",),
+    "currency_format": ("currency_format",),
+    "number_format": ("number_format",),
+    "date_format": ("date_format",),
+    "sort_by_metric": ("sort_by_metric",),
+    "show_legend": ("show_legend", "legend"),
+    "legendOrientation": ("legend_orientation", "legend"),
+    "show_labels": ("show_labels",),
+    "label_type": ("label_type",),
+    "donut": ("donut",),
+    "show_total": ("show_total",),
+    "labels_outside": ("labels_outside",),
+    "outerRadius": ("outer_radius",),
+    "innerRadius": ("inner_radius",),
+    "order_desc": ("order_desc",),
+    "bins": ("bins",),
+    "normalize": ("normalize",),
+    "cumulative": ("cumulative",),
+    "whiskerOptions": ("whisker_type", "percentile_low", "percentile_high"),
+    "increase_label": ("increase_label",),
+    "decrease_label": ("decrease_label",),
+    "total_label": ("total_label",),
+    "x_axis_time_format": ("x_axis_time_format",),
+    "y_axis_format": ("y_axis_format",),
+    "aggregateFunction": ("aggregate_function",),
+    "rowTotals": ("show_row_totals",),
+    "colTotals": ("show_column_totals",),
+    "transposePivot": ("transpose",),
+    "combineMetric": ("combine_metric",),
+    "valueFormat": ("value_format",),
+}
+
+
+def _drop_defaulted_form_data(
+    patch: dict[str, Any], merged: dict[str, Any], config: ChartConfig
+) -> None:
+    """Apply omitted-means-keep semantics to mapper-materialized defaults.
+
+    A key is only considered when the config model actually declares one of
+    its source fields, so keys other mappers derive differently are untouched.
+    An explicit ``None`` on a nullable source field clears the saved control.
+    """
+    model_fields = type(config).model_fields
+    fields_set = config.model_fields_set
+    for form_data_field, config_fields in _DEFAULTED_FORM_DATA_FIELD_MAP.items():
+        declared = [field for field in config_fields if field in model_fields]
+        if not declared:
+            continue
+        explicit = [field for field in declared if field in fields_set]
+        if not explicit:
+            patch.pop(form_data_field, None)
+        elif all(getattr(config, field) is None for field in explicit):
+            patch.pop(form_data_field, None)
+            merged.pop(form_data_field, None)
+
+
 def _without_generated_gauge_time_filter(
     form_data: dict[str, Any],
 ) -> list[Any]:
@@ -693,7 +756,10 @@ def merge_chart_form_data(  # noqa: C901
         fields_set = config.model_fields_set
         if "filters" not in fields_set:
             preserve_previous_adhoc_filters(new_form_data, existing_form_data)
-        merged = {**existing_form_data, **new_form_data}
+        patch = dict(new_form_data)
+        merged = dict(existing_form_data)
+        _drop_defaulted_form_data(patch, merged, config)
+        merged.update(patch)
         # An explicitly empty collection clears the control rather than
         # falling through to the inherited value.
         for config_field, form_data_field in (
