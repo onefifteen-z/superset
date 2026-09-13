@@ -38,6 +38,7 @@ from superset.mcp_service.chart.chart_utils import (
     map_filter_operator,
     map_table_config,
     map_xy_config,
+    merge_chart_form_data,
     merge_interactive_pivot_ui_config,
     merge_table_column_config,
     validate_chart_dataset,
@@ -47,8 +48,11 @@ from superset.mcp_service.chart.schemas import (
     ColumnRef,
     FilterConfig,
     LegendConfig,
+    PieChartConfig,
     SortByConfig,
     TableChartConfig,
+    TreemapChartConfig,
+    WaterfallChartConfig,
     XYChartConfig,
 )
 from superset.utils.core import ColumnSpec, FilterOperator, GenericDataType
@@ -232,6 +236,106 @@ class TestMergeTableColumnConfig:
         merge_table_column_config(existing, updated)
 
         assert "column_config" not in updated
+
+
+class TestMergeChartFormDataOmittedDefaults:
+    """Controls the caller omits keep their saved value, not the schema default."""
+
+    @staticmethod
+    def _pie(**overrides: Any) -> PieChartConfig:
+        base: dict[str, Any] = {
+            "chart_type": "pie",
+            "dimension": {"name": "region"},
+            "metric": {"name": "revenue", "aggregate": "SUM"},
+        }
+        return PieChartConfig(**{**base, **overrides})
+
+    def test_pie_omitted_color_scheme_and_row_limit_keep_saved_values(self) -> None:
+        saved = map_config_to_form_data(
+            self._pie(color_scheme="lyftColors", row_limit=25, donut=True)
+        )
+        config = self._pie(metric={"name": "profit", "aggregate": "SUM"})
+
+        merged = merge_chart_form_data(saved, map_config_to_form_data(config), config)
+
+        assert merged["color_scheme"] == "lyftColors"
+        assert merged["row_limit"] == 25
+        assert merged["donut"] is True
+        assert merged["metric"]["column"]["column_name"] == "profit"
+
+    def test_explicitly_set_control_overrides_saved_value(self) -> None:
+        saved = map_config_to_form_data(
+            self._pie(color_scheme="lyftColors", row_limit=25)
+        )
+        config = self._pie(color_scheme="supersetColors", row_limit=100)
+
+        merged = merge_chart_form_data(saved, map_config_to_form_data(config), config)
+
+        assert merged["color_scheme"] == "supersetColors"
+        assert merged["row_limit"] == 100
+
+    def test_default_still_applied_when_chart_never_had_the_control(self) -> None:
+        saved = {
+            "viz_type": "pie",
+            "groupby": ["region"],
+            "metric": "count",
+        }
+        config = self._pie()
+
+        merged = merge_chart_form_data(saved, map_config_to_form_data(config), config)
+
+        assert merged["color_scheme"] == "supersetColors"
+        assert merged["row_limit"] == 100
+
+    def test_treemap_omitted_controls_keep_saved_values(self) -> None:
+        base: dict[str, Any] = {
+            "chart_type": "treemap_v2",
+            "groupby": [{"name": "region"}],
+            "metric": {"name": "revenue", "aggregate": "SUM"},
+        }
+        saved = map_config_to_form_data(
+            TreemapChartConfig(**base, color_scheme="lyftColors", row_limit=50)
+        )
+        config = TreemapChartConfig(**{**base, "groupby": [{"name": "country"}]})
+
+        merged = merge_chart_form_data(saved, map_config_to_form_data(config), config)
+
+        assert merged["groupby"] == ["country"]
+        assert merged["color_scheme"] == "lyftColors"
+        assert merged["row_limit"] == 50
+
+    def test_waterfall_omitted_labels_keep_saved_values(self) -> None:
+        base: dict[str, Any] = {
+            "chart_type": "waterfall",
+            "metric": {"name": "revenue", "aggregate": "SUM"},
+            "x_axis": {"name": "month"},
+        }
+        saved = map_config_to_form_data(
+            WaterfallChartConfig(
+                **base, increase_label="Up", show_legend=False, row_limit=42
+            )
+        )
+        config = WaterfallChartConfig(**{**base, "x_axis": {"name": "quarter"}})
+
+        merged = merge_chart_form_data(saved, map_config_to_form_data(config), config)
+
+        assert merged["x_axis"] == "quarter"
+        assert merged["increase_label"] == "Up"
+        assert merged["show_legend"] is False
+        assert merged["row_limit"] == 42
+
+    def test_dataset_rebind_does_not_inherit_saved_controls(self) -> None:
+        saved = map_config_to_form_data(
+            self._pie(color_scheme="lyftColors", row_limit=25)
+        )
+        config = self._pie()
+
+        merged = merge_chart_form_data(
+            saved, map_config_to_form_data(config), config, dataset_rebind=True
+        )
+
+        assert merged["color_scheme"] == "supersetColors"
+        assert merged["row_limit"] == 100
 
 
 class TestMergeInteractivePivotUiConfig:

@@ -652,6 +652,62 @@ _GAUGE_PRESENTATION_FORM_DATA_KEYS = frozenset(
 )
 
 
+# Presentation and limit controls whose mappers always materialize a value
+# (schema default or fallback), keyed by config field -> form_data key. When
+# the caller omits the field, the saved value must win over that default.
+_PRESERVED_WHEN_OMITTED_FORM_DATA_FIELD_MAP: dict[str, str] = {
+    "color_scheme": "color_scheme",
+    "row_limit": "row_limit",
+    "series_limit": "series_limit",
+    "sort_by_metric": "sort_by_metric",
+    "show_legend": "show_legend",
+    "legend_orientation": "legendOrientation",
+    "show_labels": "show_labels",
+    "show_total": "show_total",
+    "show_value": "show_value",
+    "labels_outside": "labels_outside",
+    "label_type": "label_type",
+    "donut": "donut",
+    "inner_radius": "innerRadius",
+    "outer_radius": "outerRadius",
+    "number_format": "number_format",
+    "date_format": "date_format",
+    "currency_format": "currency_format",
+    "y_axis_format": "y_axis_format",
+    "x_axis_time_format": "x_axis_time_format",
+    "order_desc": "order_desc",
+    "bins": "bins",
+    "normalize": "normalize",
+    "cumulative": "cumulative",
+    "increase_label": "increase_label",
+    "decrease_label": "decrease_label",
+    "total_label": "total_label",
+}
+
+
+def _drop_omitted_defaults(
+    patch: dict[str, Any],
+    existing_form_data: Mapping[str, Any],
+    config: ChartConfig,
+) -> None:
+    """Remove mapper-materialized defaults for controls the caller omitted.
+
+    Only keys with a saved value are dropped, so a chart created without the
+    control still receives the mapper's default.
+    """
+    fields_set = config.model_fields_set
+    for (
+        config_field,
+        form_data_field,
+    ) in _PRESERVED_WHEN_OMITTED_FORM_DATA_FIELD_MAP.items():
+        if (
+            config_field in type(config).model_fields
+            and config_field not in fields_set
+            and form_data_field in existing_form_data
+        ):
+            patch.pop(form_data_field, None)
+
+
 def _without_generated_gauge_time_filter(
     form_data: dict[str, Any],
 ) -> list[Any]:
@@ -693,7 +749,9 @@ def merge_chart_form_data(  # noqa: C901
         fields_set = config.model_fields_set
         if "filters" not in fields_set:
             preserve_previous_adhoc_filters(new_form_data, existing_form_data)
-        merged = {**existing_form_data, **new_form_data}
+        patch = dict(new_form_data)
+        _drop_omitted_defaults(patch, existing_form_data, config)
+        merged = {**existing_form_data, **patch}
         # An explicitly empty collection clears the control rather than
         # falling through to the inherited value.
         for config_field, form_data_field in (
