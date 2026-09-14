@@ -413,6 +413,73 @@ class TestQueryContextFactory:
 
         assert query_object.columns == ["ds", "other_col"]
 
+    def test_apply_granularity_restores_time_column_from_legacy_form_data(
+        self,
+    ) -> None:
+        """A stored timeseries query without granularity takes granularity_sqla."""
+        query_object = Mock(spec=QueryObject)
+        query_object.granularity = None
+        query_object.is_timeseries = True
+        query_object.columns = ["other_col"]
+        query_object.post_processing = []
+        query_object.filter = [
+            {"col": "ds", "op": "TEMPORAL_RANGE", "val": "2023-01-01 : 2023-01-31"}
+        ]
+
+        form_data = {"granularity_sqla": "ds", "viz_type": "echarts_timeseries_bar"}
+        datasource = Mock()
+        datasource.columns = [{"column_name": "ds", "is_dttm": True}]
+
+        self.factory._apply_granularity(query_object, form_data, datasource)
+
+        assert query_object.granularity == "ds"
+        assert query_object.filter == [
+            {"col": "ds", "op": "TEMPORAL_RANGE", "val": "2023-01-01 : 2023-01-31"}
+        ]
+
+    def test_apply_granularity_ignores_legacy_form_data_for_non_timeseries(
+        self,
+    ) -> None:
+        """granularity_sqla is only restored when the query is a time series."""
+        query_object = Mock(spec=QueryObject)
+        query_object.granularity = None
+        query_object.is_timeseries = False
+        query_object.from_dttm = None
+        query_object.to_dttm = None
+        query_object.columns = ["other_col"]
+        query_object.post_processing = []
+        query_object.filter = []
+
+        form_data = {"granularity_sqla": "ds"}
+        datasource = Mock()
+        datasource.columns = [{"column_name": "ds", "is_dttm": True}]
+
+        self.factory._apply_granularity(query_object, form_data, datasource)
+
+        assert query_object.granularity is None
+
+    def test_apply_granularity_ignores_legacy_non_temporal_column(self) -> None:
+        """granularity_sqla naming a non-temporal column is not applied."""
+        query_object = Mock(spec=QueryObject)
+        query_object.granularity = None
+        query_object.is_timeseries = True
+        query_object.from_dttm = None
+        query_object.to_dttm = None
+        query_object.columns = ["other_col"]
+        query_object.post_processing = []
+        query_object.filter = []
+
+        form_data = {"granularity_sqla": "name"}
+        datasource = Mock()
+        datasource.columns = [
+            {"column_name": "ds", "is_dttm": True},
+            {"column_name": "name", "is_dttm": False},
+        ]
+
+        self.factory._apply_granularity(query_object, form_data, datasource)
+
+        assert query_object.granularity is None
+
     def test_apply_granularity_uses_main_datetime_for_bounded_expression_axis(
         self,
     ) -> None:
