@@ -254,6 +254,22 @@ class QueryContextFactory:  # pylint: disable=too-few-public-methods
             if (column["is_dttm"] if isinstance(column, dict) else column.is_dttm)
         }
         x_axis = form_data and form_data.get("x_axis")
+
+        if query_object.granularity is None and form_data:
+            # Stored query contexts are replayed as-is; a timeseries query whose
+            # time column lives only in ``form_data`` resolves it the way
+            # Explore does when it rebuilds the query.
+            legacy_time_column = form_data.get("granularity_sqla") or form_data.get(
+                "granularity"
+            )
+            if (
+                isinstance(legacy_time_column, str)
+                and legacy_time_column in temporal_columns
+                and query_object.is_timeseries
+            ):
+                query_object.granularity = legacy_time_column
+                return
+
         temporal_range_filters = [
             filter_
             for filter_ in query_object.filter
