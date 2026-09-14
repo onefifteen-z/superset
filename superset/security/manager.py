@@ -1606,7 +1606,7 @@ def _columns_metrics_modified(
                 for equiv_key in equivalent:
                     stored_values.update(
                         _payload_value_identity(value, is_metric=is_metric)
-                        for value in query.get(equiv_key) or []
+                        for value in _ensure_list(query.get(equiv_key))
                     )
 
         if not queries_values.issubset(stored_values):

@@ -1551,6 +1551,29 @@ def test_query_context_modified_scalar_control_value_tampered(
     assert query_context_modified(query_context)
 
 
+def test_query_context_modified_scalar_stored_query_context_value(
+    mocker: MockerFixture,
+) -> None:
+    """
+    A scalar column value in the chart's stored ``query_context`` authorizes
+    exactly that column: the guest may replay it, but must not be granted the
+    single-character column names that iterating the string would yield.
+    """
+    query_context = mocker.MagicMock()
+    query_context.slice_.id = 42
+    query_context.slice_.params_dict = {"groupby": "division"}
+    query_context.slice_.query_context = json.dumps(
+        {"queries": [{"groupby": "division", "metrics": []}]}
+    )
+
+    query_context.form_data = {"slice_id": 42, "groupby": "division"}
+    query_context.queries = [QueryObject(columns=["division"])]
+    assert not query_context_modified(query_context)
+
+    query_context.queries = [QueryObject(columns=["d"])]
+    assert query_context_modified(query_context)
+
+
 def test_query_context_modified_unset_scalar_control_not_tampered(
     mocker: MockerFixture,
 ) -> None:
