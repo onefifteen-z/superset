@@ -241,4 +241,10 @@ class AppRootMiddleware:
             environ["PATH_INFO"] = original_path_info[len(self.app_root) :]
             environ["SCRIPT_NAME"] = self.app_root
             return self.wsgi_app(environ, start_response)
+        # Webpack bakes "/static/assets/" into the bundles as the public path,
+        # so browsers in subdirectory deployments still request bare
+        # "/static/..." URLs. Hand those to Flask's static route unprefixed
+        # instead of 404ing them.
+        if original_path_info.startswith("/static/"):
+            return self.wsgi_app(environ, start_response)
         return NotFound()(environ, start_response)

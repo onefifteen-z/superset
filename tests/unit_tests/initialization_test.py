@@ -579,6 +579,31 @@ class TestAppRootMiddlewareBoundary:
         assert captured["PATH_INFO"] == "/welcome/"
         assert captured["SCRIPT_NAME"] == "/myapp"
 
+    def test_unprefixed_static_path_passes_through(self):
+        """Webpack bakes ``/static/assets/`` into the bundle as its public
+        path, so subdirectory deployments still receive requests for bare
+        ``/static/...`` URLs. These must reach Flask's static route with
+        PATH_INFO untouched rather than 404."""
+        middleware, captured = self._make("/myapp")
+        status = self._call(middleware, "/myapp/static/assets/logo.png")
+        assert status.startswith("200")
+        assert captured["PATH_INFO"] == "/static/assets/logo.png"
+        assert captured["SCRIPT_NAME"] == "/myapp"
+
+        middleware, captured = self._make("/myapp")
+        status = self._call(middleware, "/static/assets/logo.png")
+        assert status.startswith("200")
+        assert captured["PATH_INFO"] == "/static/assets/logo.png"
+        assert captured["SCRIPT_NAME"] == ""
+
+    def test_static_lookalike_path_is_404(self):
+        """Only the ``/static/`` segment is exempt; ``/staticfoo/...`` and the
+        bare ``/static`` token stay behind the app-root check."""
+        middleware, captured = self._make("/myapp")
+        assert self._call(middleware, "/staticfoo/x.png").startswith("404")
+        assert self._call(middleware, "/static").startswith("404")
+        assert "PATH_INFO" not in captured
+
 
 class TestRetentionBeatWarning:
     """Cover ``_warn_if_retention_beat_missing`` — the startup check that
